@@ -1,5 +1,7 @@
 # FixMemory
 
+English | [简体中文](README.zh-CN.md)
+
 ### Help your coding agent avoid debugging the same bug twice.
 
 [![npm version](https://img.shields.io/npm/v/fixmemory.svg)](https://www.npmjs.com/package/fixmemory)
