@@ -1,0 +1,7 @@
+node_modules/
+dist/
+runtime/
+coverage/
+*.tgz
+.fixmemory-test/
+.local-agent/
