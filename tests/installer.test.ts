@@ -25,7 +25,17 @@ test("setup configures detected Harness formats without replacing unrelated sett
     await installFixMemory(["local-agent"], paths);
     const result = await installFixMemory(["codex", "zcode"], paths);
     assert.deepEqual(result.configuredAgents, ["local-agent", "codex", "zcode"]);
-    assert.equal(result.toolNames.length, 5);
+    assert.deepEqual(result.toolNames.sort(), [
+      "fixmemory_confirm",
+      "fixmemory_delete",
+      "fixmemory_feedback",
+      "fixmemory_get",
+      "fixmemory_list",
+      "fixmemory_promote",
+      "fixmemory_propose",
+      "fixmemory_search",
+      "fixmemory_supersede",
+    ]);
     assert.ok(existsSync(result.runtimePath));
     assert.ok(existsSync(join(result.skillPath, "SKILL.md")));
 

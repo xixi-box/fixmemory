@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { MemoryStore } from "../core/store.js";
-import type { FeedbackResult, MemoryMatch, MemoryScope } from "../core/types.js";
+import type { DebugMemory, FeedbackResult, MemoryMatch, MemoryScope } from "../core/types.js";
 
 const EnvironmentSchema = z.record(z.string(), z.string()).default({});
 
@@ -39,6 +39,29 @@ const PromoteInputSchema = z.strictObject({
   reason: z.string().min(8).max(4_000).describe("Why this verified fix generalizes beyond its original project."),
 });
 
+const GetInputSchema = z.strictObject({
+  memory_id: z.string().uuid(),
+});
+
+const ListInputSchema = z.strictObject({
+  project_path: z.string().min(1).max(2_000).optional().describe("Current workspace path. Without it, only global memory can be listed."),
+  scope: z.enum(["project", "global", "all"]).default("all"),
+  status: z.enum(["candidate", "verified", "superseded", "all"]).default("verified"),
+  limit: z.number().int().min(1).max(100).default(20),
+  offset: z.number().int().min(0).default(0),
+});
+
+const SupersedeInputSchema = z.strictObject({
+  memory_id: z.string().uuid(),
+  reason: z.string().min(8).max(4_000).describe("Why the memory is outdated, incorrect, or unsafe to reuse."),
+  replacement_id: z.string().uuid().optional().describe("Optional verified memory that replaces this one in the same scope."),
+});
+
+const DeleteInputSchema = z.strictObject({
+  memory_id: z.string().uuid(),
+  confirm: z.literal(true).describe("Must be true. Verified memories must be superseded before deletion."),
+});
+
 function jsonResult(value: Record<string, unknown>): {
   content: [{ type: "text"; text: string }];
   structuredContent: Record<string, unknown>;
@@ -62,30 +85,100 @@ function errorResult(error: unknown): {
 
 function publicMatch(match: MemoryMatch): Record<string, unknown> {
   return {
-    id: match.memory.id,
-    scope: match.memory.scope,
-    project_label: match.memory.projectLabel ?? null,
-    symptom: match.memory.symptom,
-    root_cause: match.memory.rootCause,
-    solution: match.memory.solution,
-    evidence: match.memory.evidence,
-    environment: match.memory.environment,
-    status: match.memory.status,
+    ...publicMemory(match.memory),
     score: match.score,
     matched_terms: match.matchedTerms,
     environment_mismatches: match.environmentMismatches,
+  };
+}
+
+function publicMemory(memory: DebugMemory): Record<string, unknown> {
+  return {
+    id: memory.id,
+    scope: memory.scope,
+    project_label: memory.projectLabel ?? null,
+    symptom: memory.symptom,
+    root_cause: memory.rootCause,
+    solution: memory.solution,
+    evidence: memory.evidence,
+    environment: memory.environment,
+    status: memory.status,
+    created_at: memory.createdAt,
+    verified_at: memory.verifiedAt ?? null,
+    superseded_at: memory.supersededAt ?? null,
+    superseded_reason: memory.supersededReason ?? null,
+    replacement_id: memory.replacementId ?? null,
+    updated_at: memory.updatedAt,
     feedback: {
-      helpful: match.memory.helpfulCount,
-      irrelevant: match.memory.irrelevantCount,
-      harmful: match.memory.harmfulCount,
+      helpful: memory.helpfulCount,
+      irrelevant: memory.irrelevantCount,
+      harmful: memory.harmfulCount,
     },
   };
 }
 
 export function createFixMemoryServer(store: MemoryStore): McpServer {
   const server = new McpServer(
-    { name: "fixmemory-mcp-server", version: "0.1.0" },
+    { name: "fixmemory-mcp-server", version: "0.2.0" },
     { capabilities: { tools: {} } },
+  );
+
+  server.registerTool(
+    "fixmemory_get",
+    {
+      title: "Get a debugging memory",
+      description: "Get one memory by ID, including candidate and superseded records. Use this to inspect its status, evidence, feedback, and replacement metadata.",
+      inputSchema: GetInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ memory_id }) => {
+      try {
+        return jsonResult(publicMemory(store.get(memory_id)));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "fixmemory_list",
+    {
+      title: "List debugging memories",
+      description: "List project-visible or global memories with status filters and offset pagination. Without project_path, project-scoped records are intentionally excluded.",
+      inputSchema: ListInputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ project_path, scope, status, limit, offset }) => {
+      try {
+        const result = store.list({
+          ...(project_path ? { projectPath: project_path } : {}),
+          scope,
+          status,
+          limit,
+          offset,
+        });
+        return jsonResult({
+          total: result.total,
+          count: result.items.length,
+          offset: result.offset,
+          has_more: result.hasMore,
+          next_offset: result.nextOffset ?? null,
+          memories: result.items.map(publicMemory),
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
   );
 
   server.registerTool(
@@ -236,6 +329,52 @@ export function createFixMemoryServer(store: MemoryStore): McpServer {
           duplicate: result.duplicate,
           next_step: "Confirm the global candidate with cross-project verification evidence.",
         });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "fixmemory_supersede",
+    {
+      title: "Supersede an outdated debugging memory",
+      description: "Remove an outdated or incorrect memory from normal search while preserving an audit trail. Optionally link a verified replacement in the same scope.",
+      inputSchema: SupersedeInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ memory_id, reason, replacement_id }) => {
+      try {
+        const memory = store.supersede(memory_id, reason, replacement_id);
+        return jsonResult(publicMemory(memory));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "fixmemory_delete",
+    {
+      title: "Delete an unverified or superseded memory",
+      description: "Permanently delete a candidate or superseded memory. Requires confirm=true. Verified memory must be superseded first so accidental deletion cannot erase trusted history.",
+      inputSchema: DeleteInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ memory_id }) => {
+      try {
+        const deleted = store.delete(memory_id);
+        return jsonResult({ id: deleted.id, deleted: true, previous_status: deleted.status });
       } catch (error) {
         return errorResult(error);
       }

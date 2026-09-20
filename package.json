@@ -1,7 +1,7 @@
 {
   "name": "fixmemory",
-  "version": "0.1.0",
-  "description": "Verified debugging memory for coding agents, exposed through MCP.",
+  "version": "0.2.0",
+  "description": "Local-first, verified debugging memory for AI coding agents.",
   "type": "module",
   "bin": {
     "fixmemory": "dist/cli.js"
@@ -13,7 +13,8 @@
     "dist",
     "runtime",
     "skill",
-    "README.md"
+    "README.md",
+    "CONTRIBUTING.md"
   ],
   "scripts": {
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/build-runtime.mjs",
@@ -39,7 +40,9 @@
     "agent",
     "debugging",
     "mcp",
-    "memory"
+    "memory",
+    "local-first",
+    "coding-agent"
   ],
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { MemoryStore } from "../src/core/store.js";
 import { resolveProjectIdentity } from "../src/core/project.js";
@@ -107,6 +108,87 @@ test("git worktrees share the repository identity", () => {
     writeFileSync(join(worktreeGitDirectory, "commondir"), "../..\n");
     assert.equal(resolveProjectIdentity(main).key, resolveProjectIdentity(worktree).key);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("memories can be listed, superseded, and safely deleted", () => {
+  const root = mkdtempSync(join(tmpdir(), "fixmemory-governance-"));
+  const project = join(root, "project");
+  createGitProject(project, "https://example.com/team/governance.git");
+  const store = new MemoryStore(join(root, "memory.db"));
+  try {
+    const original = store.propose({
+      scope: "project",
+      projectPath: project,
+      symptom: "Build uses an outdated generated client",
+      rootCause: "The generated client was not refreshed after the schema changed",
+      solution: "Regenerate the client before compiling",
+      evidence: "The stale generated file reproduced the type error",
+    }).memory;
+    store.confirm(original.id, "Generation followed by the focused build completed successfully");
+    assert.equal(store.list({ projectPath: project }).total, 1);
+    assert.throws(() => store.delete(original.id), /Supersede it first/);
+
+    const replacement = store.propose({
+      scope: "project",
+      projectPath: project,
+      symptom: "Build uses an outdated generated client after schema changes",
+      rootCause: "The checked-in generator was replaced by build-time generation",
+      solution: "Run the standard build, which now generates the client automatically",
+      evidence: "The new build path generated the client before type checking",
+    }).memory;
+    store.confirm(replacement.id, "The standard build regenerated the client and completed successfully");
+    const superseded = store.supersede(
+      original.id,
+      "The generator was removed and this procedure is no longer valid",
+      replacement.id,
+    );
+    assert.equal(superseded.status, "superseded");
+    assert.equal(superseded.replacementId, replacement.id);
+    const matches = store.search({ query: "outdated generated client", projectPath: project });
+    assert.equal(matches.some((match) => match.memory.id === original.id), false);
+    assert.equal(matches.some((match) => match.memory.id === replacement.id), true);
+    assert.equal(store.list({ projectPath: project, status: "superseded" }).items[0]?.id, original.id);
+    assert.equal(store.delete(original.id).id, original.id);
+    assert.throws(() => store.get(original.id), /No memory found/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("existing 0.1 databases gain governance columns without data loss", () => {
+  const root = mkdtempSync(join(tmpdir(), "fixmemory-migration-"));
+  const databasePath = join(root, "memory.db");
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec(`
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY, scope TEXT NOT NULL, project_key TEXT, project_label TEXT,
+      symptom TEXT NOT NULL, root_cause TEXT NOT NULL, solution TEXT NOT NULL,
+      evidence TEXT NOT NULL, environment_json TEXT NOT NULL, status TEXT NOT NULL,
+      fingerprint TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, verified_at TEXT,
+      updated_at TEXT NOT NULL, helpful_count INTEGER NOT NULL DEFAULT 0,
+      irrelevant_count INTEGER NOT NULL DEFAULT 0, harmful_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE feedback (
+      memory_id TEXT NOT NULL, project_key TEXT NOT NULL, result TEXT NOT NULL,
+      created_at TEXT NOT NULL, PRIMARY KEY(memory_id, project_key)
+    );
+  `);
+  legacy.close();
+  const store = new MemoryStore(databasePath);
+  try {
+    const columns = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const names = (columns.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>).map((row) => row.name);
+      assert.ok(names.includes("superseded_reason"));
+      assert.ok(names.includes("replacement_id"));
+    } finally {
+      columns.close();
+    }
+  } finally {
+    store.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

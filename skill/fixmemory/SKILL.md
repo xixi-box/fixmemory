@@ -27,3 +27,11 @@ Do not record trivial typos, speculative fixes, raw logs, or facts that are obvi
 ## Reuse and promotion
 
 After a memory helps in another project, call `fixmemory_feedback`. Promote a project memory to a global candidate only after it has been independently helpful in at least two projects, then verify the promoted candidate again.
+
+## Memory maintenance
+
+Use `fixmemory_get` to inspect a specific record and `fixmemory_list` to audit candidates, verified memories, or superseded history. Do not retrieve unrelated project memory.
+
+When a verified memory becomes incorrect or outdated, call `fixmemory_supersede` with a concrete reason. Link a verified replacement when one exists. Superseded memory stays available for audit but disappears from normal search.
+
+Use `fixmemory_delete` only for abandoned candidates or records that have already been superseded. Never delete a verified memory merely because it did not apply to one case; record `irrelevant` or `harmful` feedback instead.

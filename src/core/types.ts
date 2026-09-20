@@ -26,6 +26,9 @@ export interface DebugMemory {
   fingerprint: string;
   createdAt: string;
   verifiedAt?: string;
+  supersededAt?: string;
+  supersededReason?: string;
+  replacementId?: string;
   updatedAt: string;
   helpfulCount: number;
   irrelevantCount: number;
@@ -55,4 +58,20 @@ export interface SearchMemoryInput {
   environment?: EnvironmentFacts;
   limit?: number;
   includeCandidates?: boolean;
+}
+
+export interface ListMemoryInput {
+  projectPath?: string;
+  scope?: MemoryScope | "all";
+  status?: MemoryStatus | "all";
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListMemoryResult {
+  total: number;
+  items: DebugMemory[];
+  offset: number;
+  hasMore: boolean;
+  nextOffset?: number;
 }

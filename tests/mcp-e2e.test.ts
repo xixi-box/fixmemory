@@ -18,14 +18,27 @@ test("official MCP client can list and call the FixMemory workflow", async () =>
     env: { FIXMEMORY_DATA_DIR: join(root, "data") },
     stderr: "pipe",
   });
-  const client = new Client({ name: "fixmemory-test", version: "0.1.0" });
+  const client = new Client({ name: "fixmemory-test", version: "0.2.0" });
   try {
     await client.connect(transport);
     const tools = await client.listTools();
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
-      ["fixmemory_confirm", "fixmemory_feedback", "fixmemory_promote", "fixmemory_propose", "fixmemory_search"],
+      [
+        "fixmemory_confirm",
+        "fixmemory_delete",
+        "fixmemory_feedback",
+        "fixmemory_get",
+        "fixmemory_list",
+        "fixmemory_promote",
+        "fixmemory_propose",
+        "fixmemory_search",
+        "fixmemory_supersede",
+      ],
     );
+    const deleteTool = tools.tools.find((tool) => tool.name === "fixmemory_delete");
+    assert.equal(deleteTool?.annotations?.destructiveHint, true);
+    assert.equal(deleteTool?.annotations?.readOnlyHint, false);
     const proposal = await client.callTool({
       name: "fixmemory_propose",
       arguments: {
@@ -59,6 +72,24 @@ test("official MCP client can list and call the FixMemory workflow", async () =>
       arguments: { query: "TypeError malformed MCP schema", project_path: project },
     });
     assert.equal((found.structuredContent as { count: number }).count, 1);
+
+    const listed = await client.callTool({
+      name: "fixmemory_list",
+      arguments: { project_path: project, status: "verified" },
+    });
+    assert.equal((listed.structuredContent as { total: number }).total, 1);
+
+    const superseded = await client.callTool({
+      name: "fixmemory_supersede",
+      arguments: { memory_id: proposalData.id, reason: "A newer schema solution replaced this debugging procedure" },
+    });
+    assert.equal((superseded.structuredContent as { status: string }).status, "superseded");
+
+    const removed = await client.callTool({
+      name: "fixmemory_delete",
+      arguments: { memory_id: proposalData.id, confirm: true },
+    });
+    assert.equal((removed.structuredContent as { deleted: boolean }).deleted, true);
   } finally {
     await client.close();
     rmSync(root, { recursive: true, force: true });
