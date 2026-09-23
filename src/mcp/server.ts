@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { MemoryStore } from "../core/store.js";
+import { createJevRerankerFromEnv, type JevReranker } from "../core/jev.js";
 import type { DebugMemory, FeedbackResult, MemoryMatch, MemoryScope } from "../core/types.js";
 
 const EnvironmentSchema = z.record(z.string(), z.string()).default({});
@@ -89,6 +90,8 @@ function publicMatch(match: MemoryMatch): Record<string, unknown> {
     score: match.score,
     matched_terms: match.matchedTerms,
     environment_mismatches: match.environmentMismatches,
+    ...(match.jevRelevance === undefined ? {} : { jev_relevance: match.jevRelevance }),
+    ...(match.jevRankBefore === undefined ? {} : { jev_rank_before: match.jevRankBefore }),
   };
 }
 
@@ -117,7 +120,8 @@ function publicMemory(memory: DebugMemory): Record<string, unknown> {
   };
 }
 
-export function createFixMemoryServer(store: MemoryStore): McpServer {
+export function createFixMemoryServer(store: MemoryStore, options: { env?: NodeJS.ProcessEnv } = {}): McpServer {
+  const reranker: JevReranker | undefined = createJevRerankerFromEnv(options.env ?? process.env);
   const server = new McpServer(
     { name: "fixmemory-mcp-server", version: "0.2.0" },
     { capabilities: { tools: {} } },
@@ -185,7 +189,7 @@ export function createFixMemoryServer(store: MemoryStore): McpServer {
     "fixmemory_search",
     {
       title: "Search verified debugging memory",
-      description: "Search project-scoped verified fixes first, then global verified fixes. Results are hypotheses and include environment mismatches; verify them against the current project before applying.",
+      description: "Search project-scoped verified fixes first, then global verified fixes. Results are hypotheses and include environment mismatches; verify them against the current project before applying. When the optional Jev rerank is enabled, matches are re-ordered by a cloud relevance model and the query plus candidate fix text are sent to jevai.org.",
       inputSchema: SearchInputSchema,
       annotations: {
         readOnlyHint: true,
@@ -196,16 +200,27 @@ export function createFixMemoryServer(store: MemoryStore): McpServer {
     },
     async ({ query, project_path, environment, limit, include_candidates }) => {
       try {
-        const matches = store.search({
+        let matches = store.search({
           query,
           ...(project_path ? { projectPath: project_path } : {}),
           environment,
           limit,
           includeCandidates: include_candidates,
         });
+        let jevRerank: { applied: boolean; model: string } | undefined;
+        if (reranker !== undefined && matches.length > 0) {
+          try {
+            matches = await reranker.rerank(query, matches);
+            jevRerank = { applied: true, model: reranker.model };
+          } catch (rerankError) {
+            const rerankMessage = rerankError instanceof Error ? rerankError.message : String(rerankError);
+            console.error(`FixMemory: Jev rerank skipped, keeping deterministic order: ${rerankMessage}`);
+          }
+        }
         return jsonResult({
           count: matches.length,
           matches: matches.map(publicMatch),
+          ...(jevRerank === undefined ? {} : { jev_rerank: jevRerank }),
           guidance: matches.length === 0
             ? "No reusable fix matched. Continue normal debugging, then propose a memory only after identifying a root cause."
             : "Treat matches as leads, check environment mismatches, and verify the current fix independently.",

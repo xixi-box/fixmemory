@@ -127,6 +127,10 @@ Claude Code, Cursor, OpenCode, VS Code, and additional Harness installers are on
 
 Destructive tools are explicitly annotated. Verified records cannot be directly deleted: supersede them first so the audit trail remains intentional.
 
+### Optional Jev relevance rerank
+
+Off by default. When the MCP Server process runs with `FIXMEMORY_JEV_RERANK=1` and `TYPESAFE_API_KEY`, `fixmemory_search` packs the query and all candidate fixes into a single request to the Jev decision model on [jevai.org](https://www.jevai.org) and re-orders results by relevance probability; each match gains `jev_relevance` and `jev_rank_before`. Failures and rate limits fall back to the deterministic order, so search never breaks. The score only influences ordering: it never filters results and never participates in the candidate → verified gate.
+
 ## Local data and privacy
 
 The machine-local database is stored at:
@@ -135,7 +139,7 @@ The machine-local database is stored at:
 ~/.fixmemory/data/memory.db
 ```
 
-FixMemory does not upload debugging memory. It uses SQLite WAL mode so several local MCP processes can share one database, rejects content that resembles credentials or private keys, and hashes project identity from the Git remote when available.
+By default FixMemory does not upload debugging memory; the only exception is the opt-in Jev rerank above, which sends the query and candidate fix text of a single search. The database uses SQLite WAL mode so several local MCP processes can share one database, rejects content that resembles credentials or private keys, and hashes project identity from the Git remote when available.
 
 “Global” means available across projects on the same machine and user account. It does not mean uploaded or shared online. On Windows, `~` is the current user's home directory, such as `C:\Users\name`.
 

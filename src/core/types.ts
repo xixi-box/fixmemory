@@ -40,6 +40,9 @@ export interface MemoryMatch {
   score: number;
   matchedTerms: string[];
   environmentMismatches: string[];
+  /** Set only when the optional Jev rerank produced this ordering. */
+  jevRelevance?: number;
+  jevRankBefore?: number;
 }
 
 export interface ProposeMemoryInput {

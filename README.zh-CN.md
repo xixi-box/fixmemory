@@ -127,6 +127,10 @@ Claude Code、Cursor、OpenCode、VS Code 等 Harness 的一键适配还在路�
 
 执行破坏性操作的工具带有明确的 MCP 注解。已验证记录不能直接删除，必须先将其淘汰，避免一次误调用抹掉仍然有效的经验。
 
+### 可选：Jev 相关性重排
+
+默认关闭。给 MCP Server 进程设置 `FIXMEMORY_JEV_RERANK=1` 和 `TYPESAFE_API_KEY` 后，`fixmemory_search` 会把当前查询和全部候选修复打包成一次请求，发送到 [jevai.org](https://www.jevai.org) 的 Jev 决策模型做相关性判断，并按概率重排结果（每条匹配附带 `jev_relevance` 和 `jev_rank_before`）。失败或限流时自动回到确定性排序，搜索永不因此失败。分数只影响排序：不过滤结果，也不参与 candidate → verified 的验证门槛。
+
 ## 本地数据与隐私
 
 本机数据库默认保存在：
@@ -135,7 +139,7 @@ Claude Code、Cursor、OpenCode、VS Code 等 Harness 的一键适配还在路�
 ~/.fixmemory/data/memory.db
 ```
 
-FixMemory 不会上传调试记忆。数据库使用 SQLite WAL 模式，多个本地 MCP 进程可以安全共享；写入前会检查疑似凭据或私钥；如果项目存在 Git remote，则使用它的哈希作为项目身份。
+默认情况下 FixMemory 不会上传调试记忆；唯一例外是上面显式开启的 Jev 重排，它只发送单次搜索的查询与候选文本。数据库使用 SQLite WAL 模式，多个本地 MCP 进程可以安全共享；写入前会检查疑似凭据或私钥；如果项目存在 Git remote，则使用它的哈希作为项目身份。
 
 这里的“全局”只表示同一用户、同一台机器上的多个项目可以访问，并不表示数据会上传或在线共享。在 Windows 上，`~` 指当前用户的主目录，例如 `C:\Users\name`。
 
